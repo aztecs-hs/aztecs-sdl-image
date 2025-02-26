@@ -4,4 +4,6 @@
 [![License](https://img.shields.io/badge/license-BSD3-blue.svg)](https://github.com/aztecs-hs/aztecs/blob/main/packages/aztecs-sdl-image/LICENSE)
 [![CI status](https://github.com/aztecs-hs/aztecs/actions/workflows/ci.yml/badge.svg)](https://github.com/aztecs-hs/aztecs/actions)
 
-[Examples](https://github.com/aztecs-hs/aztecs/blob/main/packages/aztecs-sdl-image/examples)
+SDL image rendering support for [Aztecs](https://github.com/aztecs-hs/aztecs).
+
+[Examples](https://github.com/aztecs-hs/examples)
