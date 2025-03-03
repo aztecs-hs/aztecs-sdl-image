@@ -1,8 +1,6 @@
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -10,7 +8,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 
 module Aztecs.SDL.Image
   ( -- * Components
@@ -42,8 +39,9 @@ import qualified Aztecs.ECS.Query as Q
 import qualified Aztecs.ECS.System as S
 import Aztecs.SDL (Surface (..))
 import Aztecs.Time
-import Control.Arrow (Arrow (..), (>>>))
+import Control.Arrow (Arrow (..))
 import Control.DeepSeq
+import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe (mapMaybe)
 import Data.Word (Word32)
@@ -52,18 +50,26 @@ import SDL hiding (Surface, Texture, Window, windowTitle)
 import qualified SDL
 import qualified SDL.Image as IMG
 
-#if !MIN_VERSION_base(4,20,0)
-import Data.Foldable (foldl')
-#endif
+setup :: (MonadAccess b m) => m ()
+setup = Asset.setup @_ @_ @Texture
 
-setup :: System () ()
-setup = Asset.setup @Texture
-
-load :: (MonadIO m) => Schedule m () ()
+load :: (MonadIO m, ArrowQuery m q, MonadSystem q s) => s ()
 load = Asset.loadAssets @Texture
 
-draw :: System () ()
-draw = const () <$> (drawImages &&& (animateSprites >>> drawSprites))
+draw ::
+  ( ArrowDynamicQueryReader qr,
+    ArrowQueryReader qr,
+    MonadReaderSystem qr s,
+    ArrowQuery m q,
+    MonadSystem q s,
+    MonadAccess b ma
+  ) =>
+  s (ma ())
+draw = do
+  access <- drawImages
+  animateSprites
+  access' <- drawSprites
+  return (access >> access')
 
 -- | Texture asset.
 newtype Texture = Texture {textureSurface :: SDL.Surface}
@@ -80,13 +86,13 @@ newtype Image = Image {imageTexture :: Handle Texture}
 instance Component Image
 
 -- | Draw images to their target windows.
-drawImages :: System () ()
-drawImages = proc () -> do
-  imgs <- S.filter (Q.entity &&& Q.fetch @_ @Image) (without @Surface) -< ()
-  assets <- S.single (Q.fetch @_ @(AssetServer Texture)) -< ()
+drawImages :: (ArrowDynamicQueryReader q, ArrowQueryReader q, MonadReaderSystem q s, MonadAccess b m) => s (m ())
+drawImages = do
+  imgs <- S.filter () (Q.entity &&& Q.fetch @_ @Image) (without @Surface)
+  assets <- S.single () (Q.fetch @_ @(AssetServer Texture))
   let newAssets =
         mapMaybe (\(eId, img) -> (,img,eId) <$> lookupAsset (imageTexture img) assets) imgs
-  S.queue (mapM_ go) -< newAssets
+  return $ mapM_ go newAssets
   where
     go (texture, _, eId) =
       A.insert eId Surface {sdlSurface = textureSurface texture, surfaceBounds = Nothing}
@@ -101,16 +107,16 @@ data Sprite = Sprite
 instance Component Sprite
 
 instance NFData Sprite where
-  rnf (Sprite texture bounds) = (fmap (fmap rnf) bounds) `seq` rnf texture
+  rnf (Sprite texture bounds) = fmap (fmap rnf) bounds `seq` rnf texture
 
 -- | Draw images to their target windows.
-drawSprites :: System () ()
-drawSprites = proc () -> do
-  sprites <- S.all $ Q.entity &&& Q.fetch -< ()
-  assets <- S.single (Q.fetch @_ @(AssetServer Texture)) -< ()
+drawSprites :: (ArrowQueryReader q, ArrowDynamicQueryReader q, MonadReaderSystem q s, MonadAccess b m) => s (m ())
+drawSprites = do
+  sprites <- S.all () $ Q.entity &&& Q.fetch
+  assets <- S.single () $ Q.fetch @_ @(AssetServer Texture)
   let loadedAssets =
         mapMaybe (\(eId, sprite) -> (,sprite,eId) <$> lookupAsset (spriteTexture sprite) assets) sprites
-  S.queue (mapM_ go) -< loadedAssets
+  return $ mapM_ go loadedAssets
   where
     go (texture, sprite, eId) =
       A.insert eId Surface {sdlSurface = textureSurface texture, surfaceBounds = spriteBounds sprite}
@@ -127,7 +133,7 @@ data SpriteAnimation = SpriteAnimation
 instance Component SpriteAnimation
 
 instance NFData SpriteAnimation where
-  rnf (SpriteAnimation steps index ms start) = (fmap (fmap rnf) steps) `seq` rnf index `seq` rnf ms `seq` rnf start
+  rnf (SpriteAnimation steps index ms start) = fmap (fmap rnf) steps `seq` rnf index `seq` rnf ms `seq` rnf start
 
 spriteAnimation :: SpriteAnimation
 spriteAnimation =
@@ -148,7 +154,7 @@ spriteAnimationGrid (V2 w h) tiles =
     }
 
 -- | Query to animate sprites based on the inputted `Time`.
-animateSpritesQuery :: Query Time SpriteAnimation
+animateSpritesQuery :: (ArrowQuery m q) => q Time SpriteAnimation
 animateSpritesQuery = proc currentTime -> do
   sprite <- Q.fetch @_ @Sprite -< ()
   animation <- Q.fetch @_ @SpriteAnimation -< ()
@@ -167,7 +173,7 @@ animateSpritesQuery = proc currentTime -> do
   Q.set -< animation'
 
 -- | Animate sprites based on the current `Time`.
-animateSprites :: System () ()
-animateSprites = proc () -> do
-  currentTime <- S.single (Q.fetch @_ @Time) -< ()
-  S.map_ animateSpritesQuery -< currentTime
+animateSprites :: (ArrowQueryReader qr, ArrowQuery m q, MonadReaderSystem qr s, MonadSystem q s) => s ()
+animateSprites = do
+  currentTime <- S.single () $ Q.fetch @_ @Time
+  void $ S.map currentTime animateSpritesQuery
