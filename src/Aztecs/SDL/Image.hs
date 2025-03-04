@@ -9,6 +9,14 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- |
+-- Module      : Aztecs.SDL.Image
+-- Copyright   : (c) Matt Hunzinger, 2025
+-- License     : BSD-style (see the LICENSE file in the distribution)
+--
+-- Maintainer  : matt@hunzinger.me
+-- Stability   : provisional
+-- Portability : non-portable (GHC extensions)
 module Aztecs.SDL.Image
   ( -- * Components
     Texture (..),
@@ -39,23 +47,32 @@ import qualified Aztecs.ECS.Query as Q
 import qualified Aztecs.ECS.System as S
 import Aztecs.SDL (Surface (..))
 import Aztecs.Time
-import Control.Arrow (Arrow (..))
+import Control.Arrow
 import Control.DeepSeq
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.Maybe (mapMaybe)
-import Data.Word (Word32)
-import GHC.Generics (Generic)
+import Data.Maybe
+import Data.Word
+import GHC.Generics
 import SDL hiding (Surface, Texture, Window, windowTitle)
 import qualified SDL
 import qualified SDL.Image as IMG
 
+-- | Setup image assets
+--
+-- @since 0.6.0
 setup :: (MonadAccess b m) => m ()
 setup = Asset.setup @_ @_ @Texture
 
+-- | Load image assets
+--
+-- @since 0.6.0
 load :: (MonadIO m, ArrowQuery m q, MonadSystem q s) => s ()
 load = Asset.loadAssets @Texture
 
+-- | Draw images and sprites to their target windows.
+--
+-- @since 0.6.0
 draw ::
   ( ArrowDynamicQueryReader qr,
     ArrowQueryReader qr,
@@ -72,20 +89,37 @@ draw = do
   return (access >> access')
 
 -- | Texture asset.
-newtype Texture = Texture {textureSurface :: SDL.Surface}
+--
+-- @since 0.6.0
+newtype Texture = Texture
+  { -- | Texture surface.
+    --
+    -- @since 0.6.0
+    textureSurface :: SDL.Surface
+  }
 
+-- | @since 0.6.0
 instance Asset Texture where
   type AssetConfig Texture = ()
   loadAsset path _ = Texture <$> IMG.load path
 
 -- | Image component.
-newtype Image = Image {imageTexture :: Handle Texture}
+--
+-- @since 0.6.0
+newtype Image = Image
+  { -- | Image texture handle.
+    --
+    -- @since 0.6.0
+    imageTexture :: Handle Texture
+  }
   deriving (Generic)
   deriving newtype (Show, NFData)
 
 instance Component Image
 
 -- | Draw images to their target windows.
+--
+-- @since 0.6.0
 drawImages :: (ArrowDynamicQueryReader q, ArrowQueryReader q, MonadReaderSystem q s, MonadAccess b m) => s (m ())
 drawImages = do
   imgs <- S.filter () (Q.entity &&& Q.fetch @_ @Image) (without @Surface)
@@ -95,21 +129,33 @@ drawImages = do
   return $ mapM_ go newAssets
   where
     go (texture, _, eId) =
-      A.insert eId Surface {sdlSurface = textureSurface texture, surfaceBounds = Nothing}
+      A.insert eId $ bundle Surface {sdlSurface = textureSurface texture, surfaceBounds = Nothing}
 
 -- | Sprite component.
+--
+-- @since 0.6.0
 data Sprite = Sprite
-  { spriteTexture :: !(Handle Texture),
+  { -- | Sprite texture handle.
+    --
+    -- @since 0.6.0
+    spriteTexture :: !(Handle Texture),
+    -- | Sprite bounds.
+    --
+    -- @since 0.6.0
     spriteBounds :: !(Maybe (Rectangle Int))
   }
   deriving (Show)
 
+-- | @since 0.6.0
 instance Component Sprite
 
+-- | @since 0.6.0
 instance NFData Sprite where
   rnf (Sprite texture bounds) = fmap (fmap rnf) bounds `seq` rnf texture
 
 -- | Draw images to their target windows.
+--
+-- @since 0.6.0
 drawSprites :: (ArrowQueryReader q, ArrowDynamicQueryReader q, MonadReaderSystem q s, MonadAccess b m) => s (m ())
 drawSprites = do
   sprites <- S.all () $ Q.entity &&& Q.fetch
@@ -119,22 +165,41 @@ drawSprites = do
   return $ mapM_ go loadedAssets
   where
     go (texture, sprite, eId) =
-      A.insert eId Surface {sdlSurface = textureSurface texture, surfaceBounds = spriteBounds sprite}
+      A.insert eId $ bundle Surface {sdlSurface = textureSurface texture, surfaceBounds = spriteBounds sprite}
 
 -- | Sprite animation component.
+--
+-- @since 0.6.0
 data SpriteAnimation = SpriteAnimation
-  { spriteAnimationSteps :: ![Rectangle Int],
+  { -- | Animation steps.
+    --
+    -- @since 0.6.0
+    spriteAnimationSteps :: ![Rectangle Int],
+    -- | Animation step index.
+    --
+    -- @since 0.6.0
     spriteAnimationIndex :: !Int,
+    -- | Animation duration (in milliseconds).
+    --
+    -- @since 0.6.0
     spriteAnimationMS :: !Word32,
+    -- | Animation start time.
+    --
+    -- @since 0.6.0
     spriteAnimationStart :: !Word32
   }
   deriving (Generic)
 
+-- | @since 0.6.0
 instance Component SpriteAnimation
 
+-- | @since 0.6.0
 instance NFData SpriteAnimation where
   rnf (SpriteAnimation steps index ms start) = fmap (fmap rnf) steps `seq` rnf index `seq` rnf ms `seq` rnf start
 
+-- | Empty sprite animation.
+--
+-- @since 0.6.0
 spriteAnimation :: SpriteAnimation
 spriteAnimation =
   SpriteAnimation
@@ -146,6 +211,8 @@ spriteAnimation =
 
 -- | Create a sprite animation from a grid of sprites,
 -- given the grid's tile size, and a list of tile indices.
+--
+-- @since 0.6.0
 spriteAnimationGrid :: V2 Int -> [V2 Int] -> SpriteAnimation
 spriteAnimationGrid (V2 w h) tiles =
   spriteAnimation
@@ -154,11 +221,14 @@ spriteAnimationGrid (V2 w h) tiles =
     }
 
 -- | Query to animate sprites based on the inputted `Time`.
+--
+-- @since 0.6.0
 animateSpritesQuery :: (ArrowQuery m q) => q Time SpriteAnimation
 animateSpritesQuery = proc currentTime -> do
   sprite <- Q.fetch @_ @Sprite -< ()
   animation <- Q.fetch @_ @SpriteAnimation -< ()
-  let sprite' = sprite {spriteBounds = Just $ spriteAnimationSteps animation !! spriteAnimationIndex animation}
+  let step = spriteAnimationSteps animation !! spriteAnimationIndex animation
+      sprite' = sprite {spriteBounds = Just $ step}
       animation' =
         if elapsedMS currentTime - spriteAnimationStart animation > spriteAnimationMS animation
           then
@@ -173,6 +243,8 @@ animateSpritesQuery = proc currentTime -> do
   Q.set -< animation'
 
 -- | Animate sprites based on the current `Time`.
+--
+-- @since 0.6.0
 animateSprites :: (ArrowQueryReader qr, ArrowQuery m q, MonadReaderSystem qr s, MonadSystem q s) => s ()
 animateSprites = do
   currentTime <- S.single () $ Q.fetch @_ @Time
