@@ -79,7 +79,8 @@ draw ::
     MonadReaderSystem qr s,
     ArrowQuery m q,
     MonadSystem q s,
-    MonadAccess b ma
+    MonadAccess b ma,
+    MonadIO ma
   ) =>
   s (ma ())
 draw = do
@@ -120,7 +121,7 @@ instance Component Image
 -- | Draw images to their target windows.
 --
 -- @since 0.6.0
-drawImages :: (ArrowDynamicQueryReader q, ArrowQueryReader q, MonadReaderSystem q s, MonadAccess b m) => s (m ())
+drawImages :: (ArrowDynamicQueryReader q, ArrowQueryReader q, MonadReaderSystem q s, MonadAccess b m, MonadIO m) => s (m ())
 drawImages = do
   imgs <- S.filter () (Q.entity &&& Q.fetch @_ @Image) (without @Surface)
   assets <- S.single () (Q.fetch @_ @(AssetServer Texture))
